@@ -1,0 +1,25 @@
+# Virtual environment
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# dbt
+ecommerce_dbt/target/
+ecommerce_dbt/dbt_packages/
+ecommerce_dbt/logs/
+
+# Logs
+logs/
+
+# Data files
+data/
+
+# Environment files
+.env
+
+# OS files
+.DS_Store
+Thumbs.db
+.vscode/
