@@ -1,45 +1,72 @@
-Overview
-========
+# E-commerce Data Warehouse
 
-Welcome to Astronomer! This project was generated after you ran 'astro dev init' using the Astronomer CLI. This readme describes the contents of the project, as well as how to run Apache Airflow on your local machine.
+![dbt CI](https://github.com/Tada-Disney/ecommerce-dw/actions/workflows/dbt_ci.yml/badge.svg)
 
-Project Contents
-================
+A dimensional data warehouse built on Azure SQL with dbt, modelling synthetic
+e-commerce order data into a star schema with full change history tracking,
+incremental fact loading, and automated CI.
 
-Your Astro project contains the following files and folders:
+## Architecture
 
-- dags: This folder contains the Python files for your Airflow DAGs. By default, this directory includes one example DAG:
-    - `example_astronauts`: This DAG shows a simple ETL pipeline example that queries the list of astronauts currently in space from the Open Notify API and prints a statement for each astronaut. The DAG uses the TaskFlow API to define tasks in Python, and dynamic task mapping to dynamically print a statement for each astronaut. For more on how this DAG works, see our [Getting started tutorial](https://www.astronomer.io/docs/learn/get-started-with-airflow).
-- Dockerfile: This file contains a versioned Astro Runtime Docker image that provides a differentiated Airflow experience. If you want to execute other commands or overrides at runtime, specify them here.
-- include: This folder contains any additional files that you want to include as part of your project. It is empty by default.
-- packages.txt: Install OS-level packages needed for your project by adding them to this file. It is empty by default.
-- requirements.txt: Install Python packages needed for your project by adding them to this file. It is empty by default.
-- plugins: Add custom or community plugins for your project to this file. It is empty by default.
-- airflow_settings.yaml: Use this local-only file to specify Airflow Connections, Variables, and Pools instead of entering them in the Airflow UI as you develop DAGs in this project.
+Raw order, customer, and product data is generated with Python (Faker) and
+loaded into Azure SQL. dbt then transforms it through three layers:
 
-Deploy Your Project Locally
-===========================
+- **Staging** (views) — clean and standardise raw source tables
+- **Dimensions** (tables) — `dim_customer` and `dim_product` with SCD Type 2
+  history tracking via dbt snapshots, plus a `dim_date` seed
+- **Facts** (incremental) — `fact_orders` loads only new records on each run
+  using dbt's `is_incremental()` pattern
 
-Start Airflow on your local machine by running 'astro dev start'.
+Data quality is enforced with `not_null` and `unique` tests on keys across
+all layers.
 
-This command will spin up five Docker containers on your machine, each for a different Airflow component:
+## Star Schema
 
-- Postgres: Airflow's Metadata Database
-- Scheduler: The Airflow component responsible for monitoring and triggering tasks
-- DAG Processor: The Airflow component responsible for parsing DAGs
-- API Server: The Airflow component responsible for serving the Airflow UI and API
-- Triggerer: The Airflow component responsible for triggering deferred tasks
+| Table | Type | Materialisation |
+|---|---|---|
+| `fact_orders` | Fact | Incremental |
+| `dim_customer` | Dimension (SCD Type 2) | Table |
+| `dim_product` | Dimension (SCD Type 2) | Table |
+| `dim_date` | Dimension | Seed |
 
-When all five containers are ready the command will open the browser to the Airflow UI at http://localhost:8080/. You should also be able to access your Postgres Database at 'localhost:5432/postgres' with username 'postgres' and password 'postgres'.
+## CI/CD
 
-Note: If you already have either of the above ports allocated, you can either [stop your existing Docker containers or change the port](https://www.astronomer.io/docs/astro/cli/troubleshoot-locally#ports-are-not-available-for-my-local-airflow-webserver).
+Every push to `main` triggers a GitHub Actions workflow that spins up a fresh
+runner, installs dbt and the SQL Server ODBC driver, builds a `profiles.yml`
+from encrypted repository secrets, and runs `dbt build` against Azure SQL —
+compiling all models and executing every test. The badge above reflects the
+live status of the latest run.
 
-Deploy Your Project to Astronomer
-=================================
+## Tech Stack
 
-If you have an Astronomer account, pushing code to a Deployment on Astronomer is simple. For deploying instructions, refer to Astronomer documentation: https://www.astronomer.io/docs/astro/deploy-code/
+- **Warehouse:** Azure SQL Database
+- **Transformation:** dbt (dbt-sqlserver)
+- **Data generation:** Python, Faker
+- **CI/CD:** GitHub Actions
+- **Version control:** Git / GitHub
 
-Contact
-=======
+## Project Structure
 
-The Astronomer CLI is maintained with love by the Astronomer team. To report a bug or suggest a change, reach out to our support.
+```
+ecommerce_dbt/
+├── models/
+│   ├── staging/        # source-conformed views
+│   ├── dimensions/     # dimension tables
+│   └── facts/          # incremental fact models
+├── seeds/              # dim_date.csv
+├── snapshots/          # SCD Type 2 history tracking
+└── tests/              # data quality tests
+.github/workflows/      # CI pipeline (dbt_ci.yml)
+src/generate_data.py    # synthetic data generation
+```
+
+## Running Locally
+
+```bash
+pip install dbt-sqlserver
+cd ecommerce_dbt
+dbt build
+```
+
+Requires a `~/.dbt/profiles.yml` with an `ecommerce_dbt` profile pointing at
+an Azure SQL database, and the ODBC Driver 18 for SQL Server installed.
