@@ -5,8 +5,48 @@ on:
     branches: [main]
 
 jobs:
-  hello:
+  dbt-build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Say hello
-        run: echo "The workflow triggered successfully"
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ODBC driver for SQL Server
+        run: |
+          curl https://packages.microsoft.com/keys/microsoft.asc | sudo tee /etc/apt/trusted.gpg.d/microsoft.asc
+          curl https://packages.microsoft.com/config/ubuntu/22.04/prod.list | sudo tee /etc/apt/sources.list.d/mssql-release.list
+          sudo apt-get update
+          sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18
+
+      - name: Install dbt
+        run: pip install dbt-sqlserver
+
+      - name: Create profiles.yml
+        run: |
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml << EOF
+          ecommerce_dbt:
+            target: ci
+            outputs:
+              ci:
+                type: sqlserver
+                driver: "ODBC Driver 18 for SQL Server"
+                server: ${{ secrets.DBT_SERVER }}
+                port: 1433
+                database: ${{ secrets.DBT_DATABASE }}
+                schema: dbo
+                user: ${{ secrets.DBT_USER }}
+                password: ${{ secrets.DBT_PASSWORD }}
+                encrypt: true
+                trust_cert: false
+          EOF
+
+      - name: Run dbt build
+        working-directory: ecommerce_dbt
+        run: dbt build
